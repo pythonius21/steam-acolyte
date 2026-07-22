@@ -1,27 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
+
+datas = []
+binaries = []
+hiddenimports = ['steam_acolyte.avatar', 'vdf', 'docopt']
+tmp_ret = collect_all('PyQt5')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['steam_acolyte/__main__.py'],
     pathex=[],
-    binaries=[],
-    datas=[
-    ('steam_acolyte/window.css', 'steam_acolyte'),
-    ('steam_acolyte/acolyte.svg', 'steam_acolyte'),
-    ('steam_acolyte/delete.svg', 'steam_acolyte'),
-    ('steam_acolyte/plus.svg', 'steam_acolyte'),
-    ('steam_acolyte/user.svg', 'steam_acolyte')
-    ],
-    hiddenimports=[
-    'vdf',
-    'docopt',
-    'steam_acolyte.avatar',
-    'requests',
-    'PyQt5',
-    'PyQt5.QtCore',
-    'PyQt5.QtGui',
-    'PyQt5.QtWidgets',
-    ],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -37,14 +29,14 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='steam-acolyte',
+    name='__main__',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

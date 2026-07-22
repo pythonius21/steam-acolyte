@@ -2,14 +2,15 @@ from steam_acolyte.steam import SteamUser
 from steam_acolyte.async_ import AsyncTask
 from steam_acolyte.util import Tracer
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QIcon, QGuiApplication
+from steam_acolyte.avatar import get_avatar
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QToolButton, QAbstractButton,
     QAction, QHBoxLayout, QVBoxLayout, QSizePolicy,
     QStyle, QStyleOption, QStylePainter, QWidget,
     QSystemTrayIcon, QMenu, QApplication, QScrollArea)
-
 
 try:                        # PyQt >= 5.11
     QueuedConnection = Qt.ConnectionType.QueuedConnection
@@ -91,6 +92,7 @@ class LoginDialog(QDialog):
         self.stopAction.setEnabled(False)
         self.wait_task = None
         self.update_userlist()
+        self._refresh_tray_menu()
         if self._login:
             self.run_steam(self._login)
             self._login = None
@@ -104,18 +106,25 @@ class LoginDialog(QDialog):
         # bug that leads to the icon not being displayed in plasma. See:
         # - https://github.com/coldfix/steam-acolyte/issues/8
         # - https://bugreports.qt.io/browse/QTBUG-53550
-        icon = QIcon(self.theme.window_icon.pixmap(64))
+        icon = QIcon()
+        for size in (16, 22, 24, 32, 48, 64):
+            icon.addPixmap(self.theme.window_icon.pixmap(size, size))
         self.trayicon = QSystemTrayIcon(icon)
-        self.trayicon.setVisible(True)
         self.trayicon.setToolTip(
             "acolyte - lightweight steam account manager")
         self.trayicon.activated.connect(self.trayicon_clicked)
         self.trayicon.setContextMenu(self.createMenu())
+        self.populate_menu()
+        self.trayicon.setVisible(True)
+        # On Wayland, Waybar doesn't pick up the SNI icon immediately.
+        # Re-set the icon after a short delay to force Waybar to refresh.
+        QTimer.singleShot(500, lambda: self.trayicon.setIcon(icon))
 
     @trace.method
     def hide_trayicon(self):
         """Hide and destroy the tray icon."""
         if self.trayicon is not None:
+            self.trayicon.setContextMenu(None)
             self.trayicon.setVisible(False)
             self.trayicon.deleteLater()
             self.trayicon = None
@@ -149,17 +158,13 @@ class LoginDialog(QDialog):
         menu.addSeparator()
         menu.addAction(stop)
         menu.addAction(exit)
-        menu.aboutToShow.connect(self.update_menu, QueuedConnection)
+        menu.aboutToShow.connect(self.populate_menu)
         return menu
-
-    def update_menu(self):
-        """Update menu just before showing: populate with current user list
-        and set position from tray icon."""
-        self.populate_menu()
-        self.position_menu()
 
     def populate_menu(self):
         """Update user list menuitems in tray menu."""
+        if self.trayicon is None:
+            return
         menu = self.trayicon.contextMenu()
         for action in self.userActions:
             menu.removeAction(action)
@@ -168,15 +173,28 @@ class LoginDialog(QDialog):
         self.userActions = [make_user_action(self, user) for user in users]
         menu.insertActions(self.newUserAction, self.userActions)
 
+    def _refresh_tray_menu(self):
+        """Refresh the tray context menu completely."""
+        if self.trayicon is None:
+            return
+        self.populate_menu()
+
     def position_menu(self):
         """Set menu position from tray icon."""
-        menu = self.trayicon.contextMenu()
-        desktop = QApplication.desktop()
-        screen = QApplication.screens()[desktop.screenNumber(menu)]
+        if QGuiApplication.platformName() == "wayland":
+            return
 
+        menu = self.trayicon.contextMenu()
+        icon_geom = self.trayicon.geometry()
+
+        if icon_geom.isNull() or icon_geom.isEmpty():
+            return
+
+        screen = QApplication.screenAt(icon_geom.center())
+        if screen is None:
+            screen = QApplication.primaryScreen()
         screen_geom = screen.availableGeometry()
         menu_size = menu.sizeHint()
-        icon_geom = self.trayicon.geometry()
 
         if icon_geom.left() + menu_size.width() <= screen_geom.right():
             left = icon_geom.left()
@@ -302,11 +320,23 @@ class UserWidget(ButtonWidget):
 
         theme = self.theme
         ico_label = QLabel()
-        icon = theme.user_icon if user.account_name else theme.plus_icon
-        if icon:
-            ico_label.setPixmap(icon)
-            ico_label.setToolTip(user.steam_id and
-                                 "UID: {}".format(user.steam_id))
+        ico_label.setFixedSize(48, 48)
+
+        avatar_path = get_avatar(user.steam_id)
+
+        if avatar_path:
+            pixmap = QPixmap(avatar_path)
+            ico_label.setPixmap(
+                pixmap.scaled(48, 48, Qt.KeepAspectRatio,
+                             Qt.SmoothTransformation))
+        elif user.account_name:
+            ico_label.setPixmap(theme.user_icon)
+        else:
+            ico_label.setPixmap(theme.plus_icon)
+
+        ico_label.setToolTip(
+            user.steam_id and "UID: {}".format(user.steam_id)
+        )
 
         top_label = QLabel(user.persona_name or "(other)")
         bot_label = QLabel(user.account_name or "New account")
